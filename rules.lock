@@ -1,5 +1,5 @@
 {
-  "bashlume_format": "1.0",
+  "bashlume_format": "1.1",
   "edge": {
     "commit": "c688151922743db645a209fdf862d6abab72a986",
     "ref": "main"

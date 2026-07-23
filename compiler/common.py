@@ -26,6 +26,7 @@ def command_program(
     source_commit: str,
     license_expression: str,
     candidates: Iterable[dict[str, object]],
+    path_completion: str = "inherit",
 ) -> dict[str, object]:
     registrations = sorted(set(registrations))
     candidates = sorted(
@@ -39,8 +40,14 @@ def command_program(
         "source_commit": source_commit,
         "license": license_expression,
         "static_rules": (
-            [{"when": [{"op": "true"}], "candidates": candidates}]
-            if candidates
+            [
+                {
+                    "when": [{"op": "true"}],
+                    "path_completion": path_completion,
+                    "candidates": candidates,
+                }
+            ]
+            if candidates or path_completion != "inherit"
             else []
         ),
         "probes": [],
