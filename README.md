@@ -27,4 +27,8 @@ python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp
 
 `rules.lock` pins Stable and Edge upstream commits. Workflows only create update PRs; they never push generated upstream changes directly to `main`.
 
+## Signing
+
+`keys/official.pub` is the official Ed25519 verification key (key ID `cc1bf0e554afb952f1e30a66f550b57bf0b687a629097a5efcfcf58d6c4171de`). The private key exists only in the protected `BASHLUME_SIGNING_KEY` GitHub Actions secret; release jobs fail closed when it is unavailable.
+
 Copyright © 2026 Fadouse and the respective bash-completion contributors. See `LICENSE`, `COPYRIGHT`, and generated provenance manifests.

@@ -41,6 +41,7 @@ jobs:
           chmod 600 build/signing-key.hex
           tool=.work/bashlume/target/release/bashlume-pack
           "$tool" public-key build/signing-key.hex > build/verifying-key.hex
+          cmp --silent keys/official.pub build/verifying-key.hex
           "$tool" build build/bash.json build/bash.blp build/signing-key.hex
           "$tool" verify build/bash.blp build/verifying-key.hex
           rm -f build/signing-key.hex
