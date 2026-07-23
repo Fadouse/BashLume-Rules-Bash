@@ -1,15 +1,15 @@
 {
+  "bashlume_format": "1.0",
+  "edge": {
+    "commit": "c688151922743db645a209fdf862d6abab72a986",
+    "ref": "main"
+  },
+  "minimum_engine": "0.2.0",
   "schema": 1,
   "source": "https://github.com/scop/bash-completion.git",
-  "stable_tag_regex": "[0-9]+\\.[0-9]+\\.[0-9]+",
   "stable": {
-    "ref": "2.18.0",
-    "commit": "b80d38cce5645fb98acd4eba857843fdf66be570"
+    "commit": "b80d38cce5645fb98acd4eba857843fdf66be570",
+    "ref": "2.18.0"
   },
-  "edge": {
-    "ref": "main",
-    "commit": "c688151922743db645a209fdf862d6abab72a986"
-  },
-  "bashlume_format": "1.0",
-  "minimum_engine": "0.2.0"
+  "stable_tag_regex": "[0-9]+\\.[0-9]+\\.[0-9]+"
 }
