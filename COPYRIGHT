@@ -1,0 +1,7 @@
+BashLume Rules — Bash
+Copyright (C) 2026 Fadouse <fadouse@pm.me>
+Copyright belongs to the respective bash-completion contributors for derived rules.
+
+This repository and its generated Bash-derived rule pack are distributed under
+the GNU General Public License, version 2 or (at your option) any later version.
+Every generated command block records its upstream source path and commit.

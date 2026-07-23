@@ -1,0 +1,43 @@
+name: Sync Stable
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-stable
+  cancel-in-progress: true
+
+jobs:
+  update-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve newest upstream release
+        run: python3 compiler/update_lock.py --channel stable | tee /tmp/update.json
+      - name: Open reviewed update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- rules.lock; then
+            echo 'Already current'
+            exit 0
+          fi
+          branch="automation/sync-stable-${GITHUB_RUN_ID}"
+          git config user.name 'bashlume-rules-bot'
+          git config user.email 'bashlume-rules-bot@users.noreply.github.com'
+          git switch -c "$branch"
+          git add rules.lock
+          git commit -m 'chore: sync upstream stable lock'
+          git push --set-upstream origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title 'chore: sync upstream Stable rules' \
+            --body 'Automated lock update only. Complete conversion and exact differential gates must pass before merge or release.'

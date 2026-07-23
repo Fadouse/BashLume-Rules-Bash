@@ -1,0 +1,5 @@
+/.work/
+/build/
+/dist/*.blp
+**/__pycache__/
+*.pyc

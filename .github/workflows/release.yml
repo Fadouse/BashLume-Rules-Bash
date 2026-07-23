@@ -1,0 +1,57 @@
+name: Release Stable Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Rule-pack release version
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: stable-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Fadouse/BashLume
+          path: .work/bashlume
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - run: cargo build --release --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
+      - name: Compile complete pinned baseline
+        run: |
+          mkdir -p build .work
+          python3 compiler/sync.py --channel stable --checkout .work/upstream
+          python3 compiler/compile.py --upstream .work/upstream \
+            --output build/bash.json --coverage build/coverage.json --channel stable
+          python3 tests/coverage.py --coverage build/coverage.json --spec build/bash.json
+      - name: Sign and fully verify pack
+        env:
+          BASHLUME_SIGNING_KEY: ${{ secrets.BASHLUME_SIGNING_KEY }}
+        run: |
+          test -n "$BASHLUME_SIGNING_KEY"
+          printf '%s\n' "$BASHLUME_SIGNING_KEY" > build/signing-key.hex
+          chmod 600 build/signing-key.hex
+          tool=.work/bashlume/target/release/bashlume-pack
+          "$tool" public-key build/signing-key.hex > build/verifying-key.hex
+          "$tool" build build/bash.json build/bash.blp build/signing-key.hex
+          "$tool" verify build/bash.blp build/verifying-key.hex
+          rm -f build/signing-key.hex
+      - name: Exact normalized differential suite
+        run: python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp
+      - name: Publish reviewed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          cp build/coverage.json build/bash.coverage.json
+          gh release create "$VERSION" \
+            build/bash.blp build/bash.coverage.json build/verifying-key.hex \
+            --verify-tag --generate-notes
