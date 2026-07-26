@@ -27,12 +27,20 @@ def main() -> int:
         raise SystemExit("generated command registrations are not unique")
     if len(registrations) != coverage["registrations"]:
         raise SystemExit("coverage registration count does not match generated spec")
-    allowed_licenses = {"GPL-2.0-or-later", "GPL-2.0-or-later OR ISC"}
-    unexpected_licenses = {
-        command["license"] for command in spec["commands"] if command["license"] not in allowed_licenses
+    source_records = {
+        item["path"]: item for item in [*coverage["files"], *coverage["support"]]
     }
-    if unexpected_licenses:
-        raise SystemExit(f"unexpected Bash source licenses: {sorted(unexpected_licenses)}")
+    for command in spec["commands"]:
+        licenses: set[str] = set()
+        for source_path in command["source_path"].split(";"):
+            record = source_records[source_path]
+            licenses.add(record["license"])
+            licenses.update(source_records[path]["license"] for path in record["dependencies"])
+        expected = " AND ".join(
+            f"({license})" if " OR " in license else license for license in sorted(licenses)
+        )
+        if command["license"] != expected:
+            raise SystemExit(f"incorrect Bash dependency license: {command['canonical_name']}")
     module_capabilities = {
         capability
         for command in spec["commands"]
