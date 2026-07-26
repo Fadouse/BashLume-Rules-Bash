@@ -5,6 +5,14 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd -- "$root"
 
 : "${BASHLUME_PACK:=bashlume-pack}"
+: "${BASHLUME_COMPILER_CHECKOUT:=$root/../BashLume}"
+compiler_expected=$(python3 -c 'import json; print(json.load(open("rules.lock"))["compiler"]["commit"])')
+compiler_actual=$(git -C "$BASHLUME_COMPILER_CHECKOUT" rev-parse HEAD)
+[[ $compiler_actual == "$compiler_expected" ]] || {
+  echo "pinned compiler mismatch: expected $compiler_expected, got $compiler_actual" >&2
+  exit 1
+}
+export BASHLUME_COMPILER_COMMIT=$compiler_actual
 rm -rf build
 mkdir -p build .work
 if [[ ${BASHLUME_REUSE_UPSTREAM:-0} == 1 ]]; then
@@ -26,7 +34,8 @@ printf '%s\n' '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'
   > build/test-signing-key.hex
 "$BASHLUME_PACK" public-key build/test-signing-key.hex > build/test-verifying-key.hex
 "$BASHLUME_PACK" build build/rules.json build/rules.blp build/test-signing-key.hex
-"$BASHLUME_PACK" verify build/rules.blp build/test-verifying-key.hex
+"$BASHLUME_PACK" verify-spec \
+  build/rules.json build/rules.blp build/test-verifying-key.hex
 : "${BASH_ORACLE:?BASH_ORACLE must name the pinned Bash 5.3.9 binary}"
 [[ $BASH_ORACLE == /* && -x $BASH_ORACLE ]] || {
   echo "BASH_ORACLE must be an absolute executable file" >&2
@@ -49,7 +58,8 @@ python3 tests/broad.py \
   --output build/broad.json
 python3 tests/provider_invariance.py --upstream .work/upstream
 python3 tests/evaluate_all.py \
-  --spec build/rules.json --pack build/rules.blp --pack-tool "$BASHLUME_PACK"
+  --spec build/rules.json --pack build/rules.blp --pack-tool "$BASHLUME_PACK" \
+  --verifying-key build/test-verifying-key.hex
 python3 tests/coverage.py \
   --coverage build/coverage.json --spec build/rules.json --development
 
@@ -62,6 +72,18 @@ if [[ $unsupported == 0 ]]; then
     --channel "${CHANNEL:-stable}"
   python3 tests/coverage.py \
     --coverage build/coverage-stable.json --spec build/rules-stable.json
+  cmp --silent build/rules.json build/rules-stable.json
+  cmp --silent build/coverage.json build/coverage-stable.json
+  python3 compiler/provenance.py write \
+    --upstream .work/upstream --spec build/rules.json --coverage build/coverage.json \
+    --pack build/rules.blp --pack-tool "$BASHLUME_PACK" \
+    --compiler-checkout "$BASHLUME_COMPILER_CHECKOUT" \
+    --verifying-key build/test-verifying-key.hex --output build/bash.provenance.json
+  python3 compiler/provenance.py verify \
+    --upstream .work/upstream --spec build/rules.json --coverage build/coverage.json \
+    --pack build/rules.blp --pack-tool "$BASHLUME_PACK" \
+    --compiler-checkout "$BASHLUME_COMPILER_CHECKOUT" \
+    --verifying-key build/test-verifying-key.hex --output build/bash.provenance.json
 else
   if python3 compiler/compile.py \
     --upstream .work/upstream \

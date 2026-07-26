@@ -15,9 +15,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve pinned compiler
+        id: compiler
+        run: echo "commit=$(python3 -c 'import json; print(json.load(open(\"rules.lock\"))[\"compiler\"][\"commit\"])')" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: Fadouse/BashLume
+          ref: ${{ steps.compiler.outputs.commit }}
           path: .work/bashlume
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,10 +33,11 @@ jobs:
           github:NixOS/nixpkgs/fd1462031fdee08f65fd0b4c6b64e22239a77870#bashInteractive
           --out-link .work/bash-oracle
       - name: Build pinned pack tool
-        run: cargo build --release --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
+        run: cargo build --release --locked --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
       - name: Validate pinned Stable baseline
         env:
           BASHLUME_PACK: ${{ github.workspace }}/.work/bashlume/target/release/bashlume-pack
+          BASHLUME_COMPILER_CHECKOUT: ${{ github.workspace }}/.work/bashlume
           BASH_ORACLE: ${{ github.workspace }}/.work/bash-oracle/bin/bash
           CHANNEL: stable
         run: tests/ci.sh

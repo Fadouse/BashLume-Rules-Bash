@@ -23,12 +23,16 @@ python3 compiler/compile.py --upstream .work/upstream --output build/bash.json
 bashlume-pack build build/bash.json build/bash.blp
 python3 tests/coverage.py --upstream .work/upstream --spec build/bash.json
 python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp
+python3 compiler/provenance.py write --upstream .work/upstream \
+  --spec build/bash.json --coverage build/coverage.json --pack build/bash.blp \
+  --pack-tool bashlume-pack --compiler-checkout ../BashLume \
+  --output build/bash.provenance.json
 ```
 
-`rules.lock` pins Stable and Edge upstream commits. Workflows only create update PRs; they never push generated upstream changes directly to `main`.
+`rules.lock` pins Stable and Edge upstream commits and the exact BashLume compiler commit. Coverage schema 3 hashes every primary and indexed support source and records exact linked dependencies. CI requires byte-identical recompilation and verifies the generated provenance manifest. Workflows only create update PRs; they never push generated upstream changes directly to `main`.
 
 ## Signing
 
-`keys/official.pub` is the official Ed25519 verification key (key ID `cc1bf0e554afb952f1e30a66f550b57bf0b687a629097a5efcfcf58d6c4171de`). The private key exists only in the protected `BASHLUME_SIGNING_KEY` GitHub Actions secret; release jobs fail closed when it is unavailable.
+`keys/official.pub` is the official Ed25519 verification key (key ID `cc1bf0e554afb952f1e30a66f550b57bf0b687a629097a5efcfcf58d6c4171de`). The private key exists only in the protected `BASHLUME_SIGNING_KEY` GitHub Actions secret; release jobs fail closed when it is unavailable. Stable releases build from the requested existing tag, require that tag to resolve to the checked-out commit, embed the same tag as the pack version, reproduce signed bytes, and publish canonical provenance plus `SHA256SUMS`.
 
 Copyright © 2026 Fadouse and the respective bash-completion contributors. See `LICENSE`, `COPYRIGHT`, and generated provenance manifests.

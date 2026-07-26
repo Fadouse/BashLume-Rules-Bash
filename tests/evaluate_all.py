@@ -17,6 +17,7 @@ def main() -> int:
     parser.add_argument("--spec", type=pathlib.Path, required=True)
     parser.add_argument("--pack", type=pathlib.Path, required=True)
     parser.add_argument("--pack-tool", required=True)
+    parser.add_argument("--verifying-key", type=pathlib.Path)
     arguments = parser.parse_args()
     spec = json.loads(arguments.spec.read_text(encoding="utf-8"))
     registrations = sorted(
@@ -42,8 +43,11 @@ def main() -> int:
             path = stream.name
         try:
             try:
+                command_line = [arguments.pack_tool, "evaluate", str(arguments.pack), path]
+                if arguments.verifying_key:
+                    command_line.append(str(arguments.verifying_key))
                 completed = subprocess.run(
-                    [arguments.pack_tool, "evaluate", str(arguments.pack), path],
+                    command_line,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

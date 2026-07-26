@@ -4,23 +4,36 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Rule-pack release version
+        description: Existing rule-pack release tag (for example v0.2.0)
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    environment: stable-release
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release tag and compiler lock
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse "${VERSION}^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(python3 -c 'import json; print(json.load(open("rules.lock"))["compiler"]["commit"])')" = \
+            2bff972cbaad93e423c13c4d967436545ab5e1a7
       - uses: actions/checkout@v4
         with:
           repository: Fadouse/BashLume
+          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
           path: .work/bashlume
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
@@ -30,47 +43,234 @@ jobs:
           nix build
           github:NixOS/nixpkgs/fd1462031fdee08f65fd0b4c6b64e22239a77870#bashInteractive
           --out-link .work/bash-oracle
-      - run: cargo build --release --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
+      - name: Build pinned pack tool
+        run: |
+          cargo build --release --locked --bin bashlume-pack \
+            --manifest-path .work/bashlume/Cargo.toml
+          echo "BASHLUME_PACK=$GITHUB_WORKSPACE/.work/bashlume/target/release/bashlume-pack" >> "$GITHUB_ENV"
+          echo "BASHLUME_COMPILER_COMMIT=2bff972cbaad93e423c13c4d967436545ab5e1a7" >> "$GITHUB_ENV"
       - name: Compile complete pinned baseline
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           mkdir -p build .work
           python3 compiler/sync.py --channel stable --checkout .work/upstream
           python3 compiler/compile.py --upstream .work/upstream \
-            --output build/bash.json --coverage build/coverage.json --channel stable
+            --output build/bash.json --coverage build/coverage.json --channel stable \
+            --pack-version "$VERSION"
           python3 tests/coverage.py --coverage build/coverage.json --spec build/bash.json
-      - name: Sign and fully verify pack
-        env:
-          BASHLUME_SIGNING_KEY: ${{ secrets.BASHLUME_SIGNING_KEY }}
+      - name: Build deterministic public-test-key artifact
         run: |
-          test -n "$BASHLUME_SIGNING_KEY"
-          printf '%s\n' "$BASHLUME_SIGNING_KEY" > build/signing-key.hex
-          chmod 600 build/signing-key.hex
-          tool=.work/bashlume/target/release/bashlume-pack
-          "$tool" public-key build/signing-key.hex > build/verifying-key.hex
-          cmp --silent keys/official.pub build/verifying-key.hex
-          "$tool" build build/bash.json build/bash.blp build/signing-key.hex
-          "$tool" verify build/bash.blp build/verifying-key.hex
-          rm -f build/signing-key.hex
+          printf '%s\n' '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' \
+            > build/test-signing-key.hex
+          "$BASHLUME_PACK" public-key build/test-signing-key.hex > build/test-verifying-key.hex
+          "$BASHLUME_PACK" build build/bash.json build/bash.blp build/test-signing-key.hex
+          "$BASHLUME_PACK" verify-spec \
+            build/bash.json build/bash.blp build/test-verifying-key.hex
       - name: Full native differential and bounded evaluation gates
         env:
           BASH_ORACLE: ${{ github.workspace }}/.work/bash-oracle/bin/bash
         run: |
-          tool=.work/bashlume/target/release/bashlume-pack
           python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp \
-            --pack-tool "$tool" --verifying-key build/verifying-key.hex
+            --pack-tool "$BASHLUME_PACK" --verifying-key build/test-verifying-key.hex
           python3 tests/broad.py --upstream .work/upstream --spec build/bash.json \
-            --pack build/bash.blp --pack-tool "$tool" \
-            --verifying-key build/verifying-key.hex --output build/bash.broad.json
+            --pack build/bash.blp --pack-tool "$BASHLUME_PACK" \
+            --verifying-key build/test-verifying-key.hex --output build/bash.broad.json
           python3 tests/provider_invariance.py --upstream .work/upstream
           python3 tests/evaluate_all.py --spec build/bash.json --pack build/bash.blp \
-            --pack-tool "$tool"
-      - name: Publish reviewed release
+            --pack-tool "$BASHLUME_PACK" --verifying-key build/test-verifying-key.hex
+      - name: Reproduce test-signed artifacts byte for byte
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cp build/bash.json /tmp/bash.json
+          cp build/coverage.json /tmp/coverage.json
+          cp build/bash.blp /tmp/bash.blp
+          python3 compiler/compile.py --upstream .work/upstream \
+            --output build/bash.json --coverage build/coverage.json --channel stable \
+            --pack-version "$VERSION"
+          "$BASHLUME_PACK" build build/bash.json build/bash.blp build/test-signing-key.hex
+          cmp --silent /tmp/bash.json build/bash.json
+          cmp --silent /tmp/coverage.json build/coverage.json
+          cmp --silent /tmp/bash.blp build/bash.blp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bashlume-bash-tested-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            build/bash.json
+            build/coverage.json
+            build/bash.broad.json
+
+  validate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Fadouse/BashLume
+          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
+          path: .work/bashlume
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Build fresh pinned validator
+        run: |
+          test "$(python3 -c 'import json; print(json.load(open("rules.lock"))["compiler"]["commit"])')" = \
+            2bff972cbaad93e423c13c4d967436545ab5e1a7
+          cargo build --release --locked --bin bashlume-pack \
+            --manifest-path .work/bashlume/Cargo.toml
+          echo "BASHLUME_PACK=$GITHUB_WORKSPACE/.work/bashlume/target/release/bashlume-pack" >> "$GITHUB_ENV"
+          echo "BASHLUME_COMPILER_COMMIT=2bff972cbaad93e423c13c4d967436545ab5e1a7" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: bashlume-bash-tested-${{ github.run_id }}
+          path: .work/tested
+      - name: Independently reconstruct immutable source artifact
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p build .work
+          python3 compiler/sync.py --channel stable --checkout .work/upstream
+          python3 compiler/compile.py --upstream .work/upstream \
+            --output build/bash.json --coverage build/coverage.json --channel stable \
+            --pack-version "$VERSION"
+          cmp --silent .work/tested/bash.json build/bash.json
+          cmp --silent .work/tested/coverage.json build/coverage.json
+          cp .work/tested/bash.broad.json build/bash.broad.json
+          printf '%s\n' '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' \
+            > build/test-signing-key.hex
+          "$BASHLUME_PACK" public-key build/test-signing-key.hex > build/test-verifying-key.hex
+          "$BASHLUME_PACK" build build/bash.json build/bash.blp build/test-signing-key.hex
+          "$BASHLUME_PACK" verify-spec \
+            build/bash.json build/bash.blp build/test-verifying-key.hex
+          python3 compiler/provenance.py write \
+            --upstream .work/upstream --spec build/bash.json --coverage build/coverage.json \
+            --pack build/bash.blp --pack-tool "$BASHLUME_PACK" \
+            --compiler-checkout .work/bashlume --verifying-key build/test-verifying-key.hex \
+            --output build/bash.provenance.pre.json
+          python3 compiler/provenance.py verify \
+            --upstream .work/upstream --spec build/bash.json --coverage build/coverage.json \
+            --pack build/bash.blp --pack-tool "$BASHLUME_PACK" \
+            --compiler-checkout .work/bashlume --verifying-key build/test-verifying-key.hex \
+            --output build/bash.provenance.pre.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bashlume-bash-validated-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            build/bash.json
+            build/coverage.json
+            build/bash.broad.json
+            build/bash.provenance.pre.json
+
+  sign:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: stable-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Fadouse/BashLume
+          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
+          path: .work/bashlume
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+      - name: Build isolated pinned signer
+        run: |
+          cargo build --release --locked --bin bashlume-pack \
+            --manifest-path .work/bashlume/Cargo.toml
+          echo "BASHLUME_PACK=$GITHUB_WORKSPACE/.work/bashlume/target/release/bashlume-pack" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: bashlume-bash-validated-${{ github.run_id }}
+          path: build
+      - name: Bind isolated signer to pre-provenance compiler digest
+        run: |
+          expected=$(python3 -c 'import json; print(json.load(open("build/bash.provenance.pre.json"))["compiler"]["pack_tool_sha256"])')
+          actual=$(sha256sum "$BASHLUME_PACK" | cut -d' ' -f1)
+          test "$actual" = "$expected"
+      - name: Sign and finalize without repository or upstream execution
+        env:
+          BASHLUME_SIGNING_KEY: ${{ secrets.BASHLUME_SIGNING_KEY }}
+        run: |
+          set +x
+          test -n "$BASHLUME_SIGNING_KEY"
+          key=$(mktemp)
+          trap 'rm -f -- "$key"' EXIT
+          printf '%s\n' "$BASHLUME_SIGNING_KEY" > "$key"
+          chmod 600 "$key"
+          "$BASHLUME_PACK" public-key "$key" > build/verifying-key.hex
+          cmp --silent \
+            .work/bashlume/rules/trusted-keys/bash-rules.pub build/verifying-key.hex
+          "$BASHLUME_PACK" build build/bash.json build/bash.blp "$key"
+          "$BASHLUME_PACK" build build/bash.json /tmp/bash.official.blp "$key"
+          cmp --silent build/bash.blp /tmp/bash.official.blp
+          "$BASHLUME_PACK" verify-spec \
+            build/bash.json build/bash.blp build/verifying-key.hex
+          "$BASHLUME_PACK" finalize-provenance \
+            build/bash.provenance.pre.json build/bash.json build/bash.blp \
+            build/verifying-key.hex build/bash.provenance.json
+      - name: Assemble signed release assets
+        run: |
+          cp build/coverage.json build/bash.coverage.json
+          (cd build && sha256sum \
+            bash.blp bash.coverage.json bash.broad.json bash.provenance.json \
+            verifying-key.hex > bash.SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bashlume-bash-signed-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            build/bash.blp
+            build/bash.coverage.json
+            build/bash.broad.json
+            build/bash.provenance.json
+            build/bash.SHA256SUMS
+            build/verifying-key.hex
+
+  publish:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: bashlume-bash-signed-${{ github.run_id }}
+          path: release
+      - name: Verify artifact source commit
+        run: |
+          expected=$(python3 -c 'import json; print(json.load(open("release/bash.provenance.json"))["rule_repository"]["commit"])')
+          test "$(git rev-parse HEAD)" = "$expected"
+      - name: Recheck immutable tag and publish
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
-          cp build/coverage.json build/bash.coverage.json
+          git fetch --force --no-tags origin \
+            "refs/tags/$VERSION:refs/bashlume-release-check"
+          test "$(git rev-parse 'refs/bashlume-release-check^{commit}')" = "$(git rev-parse HEAD)"
           gh release create "$VERSION" \
-            build/bash.blp build/bash.coverage.json build/bash.broad.json \
-            build/verifying-key.hex \
+            release/bash.blp release/bash.coverage.json release/bash.broad.json \
+            release/bash.provenance.json release/bash.SHA256SUMS release/verifying-key.hex \
             --verify-tag --generate-notes

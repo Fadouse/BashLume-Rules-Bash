@@ -26,7 +26,18 @@ def main() -> int:
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--coverage", type=pathlib.Path, default=pathlib.Path("build/coverage.json"))
     parser.add_argument("--channel", choices=("stable", "edge"), default="stable")
+    parser.add_argument("--pack-version")
     arguments = parser.parse_args()
+
+    repository = pathlib.Path(__file__).resolve().parents[1]
+    lock = json.loads((repository / "rules.lock").read_text(encoding="utf-8"))
+    compiler = lock["compiler"]
+    compiler_commit = compiler["commit"]
+    actual_compiler = os.environ.get("BASHLUME_COMPILER_COMMIT")
+    if actual_compiler and actual_compiler != compiler_commit:
+        raise SystemExit(
+            f"compiler mismatch: expected {compiler_commit}, got {actual_compiler}"
+        )
 
     upstream = arguments.upstream.resolve()
     files = source_files(upstream)
@@ -36,6 +47,14 @@ def main() -> int:
     if not support.is_file():
         raise SystemExit("pinned bash_completion support library is missing")
     commit = git_commit(upstream)
+    expected_commit = lock[arguments.channel]["commit"]
+    if commit != expected_commit:
+        raise SystemExit(
+            f"pinned upstream mismatch: expected {expected_commit}, got {commit}"
+        )
+    pack_version = arguments.pack_version or f"0.0.0+{commit[:12]}"
+    if not pack_version or "\0" in pack_version:
+        raise SystemExit("pack version must be non-empty and contain no NUL")
     config = {
         "dialect": "bash",
         "source_root": str(upstream),
@@ -47,13 +66,13 @@ def main() -> int:
         ],
         "manifest": {
             "pack_id": "org.bashlume.rules.bash",
-            "pack_version": f"0.0.0+{commit[:12]}",
+            "pack_version": pack_version,
             "source_kind": "bash",
             "source_repository": "https://github.com/scop/bash-completion.git",
             "source_commit": commit,
             "license_expression": "GPL-2.0-or-later",
             "channel": arguments.channel,
-            "compiler_version": "bashlume-0.2.0",
+            "compiler_version": f"bashlume-{compiler['version']}+{compiler_commit[:12]}",
             "generated_at": "1970-01-01T00:00:00Z",
             "stale_commands": [],
             "probe_capabilities": [],

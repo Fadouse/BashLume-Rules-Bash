@@ -1,0 +1,12 @@
+{
+  "default": "GPL-2.0-or-later",
+  "licenses": {
+    "GPL-2.0-or-later": "LICENSES/GPL-2.0-or-later.txt",
+    "ISC": "LICENSES/ISC.txt"
+  },
+  "overrides": {
+    "completions-core/tmux.bash": "GPL-2.0-or-later OR ISC"
+  },
+  "pack_expression": "GPL-2.0-or-later",
+  "schema": 1
+}
