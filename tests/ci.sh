@@ -7,15 +7,49 @@ cd -- "$root"
 : "${BASHLUME_PACK:=bashlume-pack}"
 rm -rf build
 mkdir -p build .work
-python3 compiler/sync.py --channel "${CHANNEL:-stable}" --checkout .work/upstream
+if [[ ${BASHLUME_REUSE_UPSTREAM:-0} == 1 ]]; then
+  expected=$(python3 -c 'import json, os; data=json.load(open("rules.lock")); print(data[os.environ.get("CHANNEL", "stable")]["commit"])')
+  actual=$(git -C .work/upstream rev-parse HEAD)
+  [[ $actual == "$expected" ]] || {
+    echo "pinned upstream mismatch: expected $expected, got $actual" >&2
+    exit 1
+  }
+else
+  python3 compiler/sync.py --channel "${CHANNEL:-stable}" --checkout .work/upstream
+fi
 python3 compiler/compile.py \
   --upstream .work/upstream \
   --output build/rules.json \
   --coverage build/coverage.json \
-  --channel "${CHANNEL:-stable}" \
-  --allow-incomplete
-"$BASHLUME_PACK" build build/rules.json build/rules.blp
-"$BASHLUME_PACK" verify build/rules.blp
+  --channel "${CHANNEL:-stable}"
+printf '%s\n' '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f' \
+  > build/test-signing-key.hex
+"$BASHLUME_PACK" public-key build/test-signing-key.hex > build/test-verifying-key.hex
+"$BASHLUME_PACK" build build/rules.json build/rules.blp build/test-signing-key.hex
+"$BASHLUME_PACK" verify build/rules.blp build/test-verifying-key.hex
+: "${BASH_ORACLE:?BASH_ORACLE must name the pinned Bash 5.3.9 binary}"
+[[ $BASH_ORACLE == /* && -x $BASH_ORACLE ]] || {
+  echo "BASH_ORACLE must be an absolute executable file" >&2
+  exit 1
+}
+# Expanded by the pinned Bash subprocess.
+# shellcheck disable=SC2016
+bash_version=$("$BASH_ORACLE" --noprofile --norc -c 'printf "%s" "$BASH_VERSION"')
+[[ $bash_version == 5.3.9* ]] || {
+  echo "pinned Bash oracle must be 5.3.9, got $bash_version" >&2
+  exit 1
+}
+export BASH_ORACLE
+python3 tests/differential.py \
+  --upstream .work/upstream --pack build/rules.blp --pack-tool "$BASHLUME_PACK" \
+  --verifying-key build/test-verifying-key.hex
+python3 tests/broad.py \
+  --upstream .work/upstream --spec build/rules.json --pack build/rules.blp \
+  --pack-tool "$BASHLUME_PACK" --verifying-key build/test-verifying-key.hex \
+  --output build/broad.json
+python3 tests/provider_invariance.py --upstream .work/upstream
+python3 tests/evaluate_all.py \
+  --spec build/rules.json --pack build/rules.blp --pack-tool "$BASHLUME_PACK"
 python3 tests/coverage.py \
   --coverage build/coverage.json --spec build/rules.json --development
 

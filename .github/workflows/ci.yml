@@ -22,10 +22,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
+      - uses: cachix/install-nix-action@v31
+      - name: Build pinned Bash 5.3.9 oracle
+        run: >-
+          nix build
+          github:NixOS/nixpkgs/fd1462031fdee08f65fd0b4c6b64e22239a77870#bashInteractive
+          --out-link .work/bash-oracle
       - name: Build pinned pack tool
         run: cargo build --release --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
       - name: Validate pinned Stable baseline
         env:
           BASHLUME_PACK: ${{ github.workspace }}/.work/bashlume/target/release/bashlume-pack
+          BASH_ORACLE: ${{ github.workspace }}/.work/bash-oracle/bin/bash
           CHANNEL: stable
         run: tests/ci.sh

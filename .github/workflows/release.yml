@@ -24,6 +24,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.85.0
+      - uses: cachix/install-nix-action@v31
+      - name: Build pinned Bash 5.3.9 oracle
+        run: >-
+          nix build
+          github:NixOS/nixpkgs/fd1462031fdee08f65fd0b4c6b64e22239a77870#bashInteractive
+          --out-link .work/bash-oracle
       - run: cargo build --release --bin bashlume-pack --manifest-path .work/bashlume/Cargo.toml
       - name: Compile complete pinned baseline
         run: |
@@ -45,8 +51,19 @@ jobs:
           "$tool" build build/bash.json build/bash.blp build/signing-key.hex
           "$tool" verify build/bash.blp build/verifying-key.hex
           rm -f build/signing-key.hex
-      - name: Exact normalized differential suite
-        run: python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp
+      - name: Full native differential and bounded evaluation gates
+        env:
+          BASH_ORACLE: ${{ github.workspace }}/.work/bash-oracle/bin/bash
+        run: |
+          tool=.work/bashlume/target/release/bashlume-pack
+          python3 tests/differential.py --upstream .work/upstream --pack build/bash.blp \
+            --pack-tool "$tool" --verifying-key build/verifying-key.hex
+          python3 tests/broad.py --upstream .work/upstream --spec build/bash.json \
+            --pack build/bash.blp --pack-tool "$tool" \
+            --verifying-key build/verifying-key.hex --output build/bash.broad.json
+          python3 tests/provider_invariance.py --upstream .work/upstream
+          python3 tests/evaluate_all.py --spec build/bash.json --pack build/bash.blp \
+            --pack-tool "$tool"
       - name: Publish reviewed release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,5 +71,6 @@ jobs:
         run: |
           cp build/coverage.json build/bash.coverage.json
           gh release create "$VERSION" \
-            build/bash.blp build/bash.coverage.json build/verifying-key.hex \
+            build/bash.blp build/bash.coverage.json build/bash.broad.json \
+            build/verifying-key.hex \
             --verify-tag --generate-notes

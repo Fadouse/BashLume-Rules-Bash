@@ -1,0 +1,160 @@
+[
+  {
+    "name": "7z commands",
+    "source": "completions-core/7z.bash",
+    "context": {
+      "command": "7z",
+      "current_word": "",
+      "words": [
+        "7z",
+        ""
+      ],
+      "word_index": 1,
+      "command_path": [
+        "7z"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "apt-get long options",
+    "source": "completions-core/apt-get.bash",
+    "context": {
+      "command": "apt-get",
+      "current_word": "--",
+      "words": [
+        "apt-get",
+        "--"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "apt-get"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "brace-expanded Python registration",
+    "source": "completions-core/python.bash",
+    "context": {
+      "command": "python3.12",
+      "current_word": "-",
+      "words": [
+        "python3.12",
+        "-"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "python3.12"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "jq options",
+    "source": "completions-core/jq.bash",
+    "context": {
+      "command": "jq",
+      "current_word": "--",
+      "words": [
+        "jq",
+        "--"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "jq"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "apt-get commands",
+    "source": "completions-core/apt-get.bash",
+    "context": {
+      "command": "apt-get",
+      "current_word": "",
+      "words": [
+        "apt-get",
+        ""
+      ],
+      "word_index": 1,
+      "command_path": [
+        "apt-get"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "jq short and long options",
+    "source": "completions-core/jq.bash",
+    "context": {
+      "command": "jq",
+      "current_word": "-",
+      "words": [
+        "jq",
+        "-"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "jq"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "chronyc option",
+    "source": "completions-core/chronyc.bash",
+    "context": {
+      "command": "chronyc",
+      "current_word": "-",
+      "words": [
+        "chronyc",
+        "-"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "chronyc"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": false
+    }
+  },
+  {
+    "name": "ifstat signed dynamic help probe",
+    "source": "completions-core/ifstat.bash",
+    "fixture_executables": {
+      "ifstat": {
+        "--help": "Usage: ifstat [OPTION]\n   -h, --help           this message\n   -a, --ignore         ignore history\n   -d, --scan=SECS      sample every SECS\n   -e, --errors         show errors\n   -j, --json           format output in JSON\n   -n, --nooutput       do history only\n   -p, --pretty         pretty print\n   -r, --reset          reset history\n   -s, --noupdate       do not update history\n   -t, --interval=SECS  report interval\n   -V, --version        output version\n   -z, --zeros          include zero values\n   -x, --extended=TYPE  extended stats\n",
+        "--usage": "Usage: ifstat [--help] [--version]\n"
+      }
+    },
+    "context": {
+      "command": "ifstat",
+      "current_word": "--",
+      "words": [
+        "ifstat",
+        "--"
+      ],
+      "word_index": 1,
+      "command_path": [
+        "ifstat"
+      ],
+      "environment": {},
+      "working_directory": "/tmp",
+      "explicit_tab": true
+    }
+  }
+]

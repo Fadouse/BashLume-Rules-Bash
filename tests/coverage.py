@@ -27,6 +27,24 @@ def main() -> int:
         raise SystemExit("generated command registrations are not unique")
     if len(registrations) != coverage["registrations"]:
         raise SystemExit("coverage registration count does not match generated spec")
+    allowed_licenses = {"GPL-2.0-or-later", "GPL-2.0-or-later OR ISC"}
+    unexpected_licenses = {
+        command["license"] for command in spec["commands"] if command["license"] not in allowed_licenses
+    }
+    if unexpected_licenses:
+        raise SystemExit(f"unexpected Bash source licenses: {sorted(unexpected_licenses)}")
+    module_capabilities = {
+        capability
+        for command in spec["commands"]
+        for script in command["scripts"]
+        for capability in script["probe_capabilities"]
+    }
+    manifest_capabilities = set(spec["manifest"]["probe_capabilities"])
+    if module_capabilities != manifest_capabilities:
+        raise SystemExit("manifest and Script IR probe capabilities differ")
+    forbidden = {"sh", "bash", "dash", "zsh", "fish", "else", "fi", "always"}
+    if manifest_capabilities & forbidden or any(capability.isdigit() for capability in manifest_capabilities):
+        raise SystemExit("probe capability set contains a shell primitive or parser artifact")
 
     unsupported = int(coverage["unsupported_files"])
     stale = set(spec["manifest"]["stale_commands"])
@@ -40,7 +58,7 @@ def main() -> int:
         raise SystemExit("development stale manifest does not exactly match unsupported rules")
     if arguments.development:
         if unsupported == 0:
-            print("development baseline unexpectedly reached full coverage")
+            print("development coverage reached the full baseline")
         else:
             print(f"development coverage accounted for {unsupported} unsupported source files")
         return 0
