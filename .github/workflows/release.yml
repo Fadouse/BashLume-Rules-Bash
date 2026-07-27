@@ -38,6 +38,14 @@ jobs:
         with:
           toolchain: 1.85.0
       - uses: cachix/install-nix-action@v31
+      - name: Enable rootless oracle sandbox
+        run: |
+          if [[ -e /proc/sys/kernel/unprivileged_userns_clone ]]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Build pinned Bash 5.3.9 oracle
         run: >-
           nix build
