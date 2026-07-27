@@ -27,11 +27,11 @@ jobs:
           [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
           test "$(git rev-parse "${VERSION}^{commit}")" = "$(git rev-parse HEAD)"
           test "$(python3 -c 'import json; print(json.load(open("rules.lock"))["compiler"]["commit"])')" = \
-            2bff972cbaad93e423c13c4d967436545ab5e1a7
+            0c2e324308c87b1ed4efd6072cdb173cc5865fba
       - uses: actions/checkout@v4
         with:
           repository: Fadouse/BashLume
-          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
+          ref: 0c2e324308c87b1ed4efd6072cdb173cc5865fba
           path: .work/bashlume
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,7 @@ jobs:
           cargo build --release --locked --bin bashlume-pack \
             --manifest-path .work/bashlume/Cargo.toml
           echo "BASHLUME_PACK=$GITHUB_WORKSPACE/.work/bashlume/target/release/bashlume-pack" >> "$GITHUB_ENV"
-          echo "BASHLUME_COMPILER_COMMIT=2bff972cbaad93e423c13c4d967436545ab5e1a7" >> "$GITHUB_ENV"
+          echo "BASHLUME_COMPILER_COMMIT=0c2e324308c87b1ed4efd6072cdb173cc5865fba" >> "$GITHUB_ENV"
       - name: Compile complete pinned baseline
         env:
           VERSION: ${{ inputs.version }}
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Fadouse/BashLume
-          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
+          ref: 0c2e324308c87b1ed4efd6072cdb173cc5865fba
           path: .work/bashlume
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
@@ -124,11 +124,11 @@ jobs:
       - name: Build fresh pinned validator
         run: |
           test "$(python3 -c 'import json; print(json.load(open("rules.lock"))["compiler"]["commit"])')" = \
-            2bff972cbaad93e423c13c4d967436545ab5e1a7
+            0c2e324308c87b1ed4efd6072cdb173cc5865fba
           cargo build --release --locked --bin bashlume-pack \
             --manifest-path .work/bashlume/Cargo.toml
           echo "BASHLUME_PACK=$GITHUB_WORKSPACE/.work/bashlume/target/release/bashlume-pack" >> "$GITHUB_ENV"
-          echo "BASHLUME_COMPILER_COMMIT=2bff972cbaad93e423c13c4d967436545ab5e1a7" >> "$GITHUB_ENV"
+          echo "BASHLUME_COMPILER_COMMIT=0c2e324308c87b1ed4efd6072cdb173cc5865fba" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: bashlume-bash-tested-${{ github.run_id }}
@@ -179,7 +179,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Fadouse/BashLume
-          ref: 2bff972cbaad93e423c13c4d967436545ab5e1a7
+          ref: 0c2e324308c87b1ed4efd6072cdb173cc5865fba
           path: .work/bashlume
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable

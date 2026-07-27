@@ -1,7 +1,7 @@
 {
   "bashlume_format": "1.1",
   "compiler": {
-    "commit": "2bff972cbaad93e423c13c4d967436545ab5e1a7",
+    "commit": "0c2e324308c87b1ed4efd6072cdb173cc5865fba",
     "repository": "https://github.com/Fadouse/BashLume.git",
     "rust_toolchain": "1.85.0",
     "version": "0.2.0"

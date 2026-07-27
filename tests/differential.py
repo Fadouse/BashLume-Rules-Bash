@@ -8,6 +8,7 @@ import glob
 import json
 import os
 import pathlib
+import re
 import shutil
 import stat
 import subprocess
@@ -64,7 +65,7 @@ def compile_fixtures(cases: list[dict[str, object]], directory: pathlib.Path) ->
     for case in cases:
         fixtures.update(case.get("fixture_executables", {}))
     for name, responses in fixtures.items():
-        if not name.replace("-", "").replace("_", "").isalnum():
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None:
             raise RuntimeError(f"invalid fixture executable name: {name!r}")
         statements = [
             f"if (argc > 1 && strcmp(argv[1], {json.dumps(argument)}) == 0) "

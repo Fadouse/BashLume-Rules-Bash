@@ -40,6 +40,11 @@
   {
     "name": "brace-expanded Python registration",
     "source": "completions-core/python.bash",
+    "fixture_executables": {
+      "python3.12": {
+        "-h": "usage: python3.12 [option] ...\n-b     issue warnings\n-bb    issue errors\n-B     do not write pyc\n-c cmd program passed in as string\n-E     ignore environment variables\n-h     print help\n-i     inspect interactively\n-I     isolate Python\n-m mod run library module\n-O     optimize\n-OO    remove docstrings\n-P     do not prepend path\n-q     quiet\n-s     no user site\n-S     no site\n-u     unbuffered\n-v     verbose\n-V     version\n-W arg warning control\n-X opt set implementation option\n--check-hash-based-pycs mode\n--help-env display environment help\n--help-xoptions display -X help\n--help-all display complete help\n"
+      }
+    },
     "context": {
       "command": "python3.12",
       "current_word": "-",
@@ -53,7 +58,7 @@
       ],
       "environment": {},
       "working_directory": "/tmp",
-      "explicit_tab": false
+      "explicit_tab": true
     }
   },
   {

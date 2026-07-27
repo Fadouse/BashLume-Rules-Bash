@@ -45,15 +45,9 @@ BASH_BUILTINS = {
 
 
 def fixed_available_commands() -> list[str]:
-    commands = set(BASH_BUILTINS)
-    for directory in (pathlib.Path("/usr/bin"), pathlib.Path("/bin")):
-        try:
-            for entry in directory.iterdir():
-                if entry.is_file() and os.access(entry, os.X_OK):
-                    commands.add(entry.name)
-        except OSError:
-            pass
-    return sorted(commands)
+    # The VM receives Bash's captured command snapshot, not the CI host's
+    # /usr/bin inventory. Keep this target context identical on every runner.
+    return sorted(BASH_BUILTINS)
 
 
 def fixed_snapshots() -> tuple[list[str], list[str], list[str]]:
