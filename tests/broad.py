@@ -19,6 +19,9 @@ from typing import Any
 
 
 ERROR_CATEGORIES = {"semantic_diff", "oracle_error", "vm_error", "resource_truncated"}
+CONTEXT_ONLY_HOST_CASES = {
+    ("umount", "", "completions-fallback/umount.linux.bash"),
+}
 FIXED_USERS = ["root", "snapshot-user"]
 FIXED_GROUPS = ["root", "snapshot-group"]
 FIXED_HOSTS = ["localhost", "snapshot-host"]
@@ -52,6 +55,48 @@ def fixed_available_commands() -> list[str]:
 
 def fixed_snapshots() -> tuple[list[str], list[str], list[str]]:
     return FIXED_USERS.copy(), FIXED_GROUPS.copy(), FIXED_HOSTS.copy()
+
+
+def oracle_store_closure() -> list[str]:
+    configured = os.environ.get("BASH_ORACLE")
+    if not configured:
+        raise SystemExit("BASH_ORACLE must name the pinned Nix Bash oracle")
+    shell = pathlib.Path(configured).resolve(strict=True)
+    store = pathlib.Path("/nix/store")
+    try:
+        relative = shell.relative_to(store)
+    except ValueError as error:
+        raise SystemExit("broad Bash oracle must reside in /nix/store") from error
+    if len(relative.parts) < 2:
+        raise SystemExit(f"invalid Nix Bash oracle path: {shell}")
+    query = shutil.which("nix-store")
+    if query is None:
+        raise SystemExit("broad Bash oracle requires nix-store")
+    completed = subprocess.run(
+        [query, "--query", "--requisites", str(shell)],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode:
+        raise SystemExit(
+            "failed to resolve the pinned Bash runtime closure: "
+            + (completed.stderr[-1000:] or f"status {completed.returncode}")
+        )
+    closure = sorted(set(completed.stdout.splitlines()))
+    if not closure:
+        raise SystemExit("pinned Bash runtime closure is empty")
+    for item in closure:
+        path = pathlib.Path(item)
+        if path.parent != store or not path.is_dir():
+            raise SystemExit(f"invalid Bash runtime closure path: {item}")
+    shell_root = store / relative.parts[0]
+    if str(shell_root) not in closure:
+        raise SystemExit("Bash runtime closure does not contain the oracle")
+    return closure
 
 
 def literal_registration(command: str) -> bool:
@@ -104,7 +149,9 @@ def normalize(candidates: list[dict[str, object]], native: bool, prefix: str) ->
 
 
 def resolve_filesystem_request(
-    request: dict[str, object], working_directory: pathlib.Path
+    request: dict[str, object],
+    working_directory: pathlib.Path,
+    allowed_roots: tuple[pathlib.Path, ...],
 ) -> list[str]:
     path = str(request["path"])
     if request["kind"] == "test" and not path:
@@ -112,6 +159,9 @@ def resolve_filesystem_request(
     resolved = pathlib.Path(path)
     if not resolved.is_absolute():
         resolved = working_directory / resolved
+    canonical = pathlib.Path(os.path.realpath(resolved))
+    if not any(canonical == root or root in canonical.parents for root in allowed_roots):
+        return []
     if request["kind"] == "glob":
         values = glob.glob(str(resolved))[:4096]
         if not pathlib.Path(path).is_absolute():
@@ -166,7 +216,14 @@ def run_oracle(
                 "--upstream",
                 str(arguments.upstream),
                 "--case-json",
-                json.dumps({**case, "capture_providers": True}, separators=(",", ":")),
+                json.dumps(
+                    {
+                        **case,
+                        "capture_providers": True,
+                        "isolate_host_providers": True,
+                    },
+                    separators=(",", ":"),
+                ),
             ],
             cwd=arguments.repository,
             check=False,
@@ -255,7 +312,9 @@ def run_vm(
             if request_id in completion_results:
                 continue
             completion_results[request_id] = resolve_filesystem_request(
-                request, pathlib.Path(str(context["working_directory"]))
+                request,
+                pathlib.Path(str(context["working_directory"])),
+                arguments.allowed_filesystem_roots,
             )
             progressed = True
         if result.get("completion_requests"):
@@ -277,7 +336,7 @@ def run_vm(
                 }
                 progressed = True
                 continue
-            executable = shutil.which(str(key["executable"]), path="/usr/bin:/bin")
+            executable = shutil.which(str(key["executable"]), path=arguments.path_value)
             if executable is None:
                 probe_outcomes[probe["probe_id"]] = {
                     "status": 127,
@@ -286,7 +345,11 @@ def run_vm(
                 }
                 progressed = True
                 continue
-            environment = {"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8", "HOME": str(arguments.home)}
+            environment = {
+                "PATH": arguments.path_value,
+                "LC_ALL": "C.UTF-8",
+                "HOME": str(arguments.home),
+            }
             environment.update(dict(key.get("environment", [])))
             try:
                 completed_probe = subprocess.run(
@@ -337,92 +400,155 @@ def dimensions(expected: dict[str, Any], actual: dict[str, Any], prefix: str) ->
     }
 
 
+def canonical_provider(provider: str) -> str:
+    return {
+        "alias": "command",
+        "builtin": "command",
+        "directory": "filesystem",
+        "file": "filesystem",
+        "function": "command",
+        "keyword": "command",
+        "service": "network",
+    }.get(provider, provider)
+
+
+def oracle_provider_categories(expected: dict[str, Any]) -> set[str]:
+    categories = {
+        canonical_provider(str(provider))
+        for provider in expected.get("provider_categories", [])
+    }
+    mapping = expected.get("provider_candidates", {})
+    if isinstance(mapping, dict):
+        categories.update(canonical_provider(str(provider)) for provider in mapping)
+    return categories
+
+
+def authorized_snapshot_providers(
+    expected: dict[str, Any], actual: dict[str, Any]
+) -> set[str]:
+    native = oracle_provider_categories(expected)
+    return {
+        canonical_provider(str(provider))
+        for provider in actual.get("snapshot_providers", [])
+        if canonical_provider(str(provider)) in native
+    }
+
+
+def snapshot_provider_values(snapshots: set[str]) -> set[str]:
+    values: set[str] = set()
+    if "process" in snapshots:
+        values.update(FIXED_PROCESS_IDS)
+        values.update(FIXED_PROCESS_NAMES)
+    if "network" in snapshots:
+        values.update(FIXED_NETWORK_INTERFACES)
+    if "signal" in snapshots:
+        values.update(FIXED_SIGNALS)
+    if "user" in snapshots:
+        values.update(FIXED_USERS)
+    if "group" in snapshots:
+        values.update(FIXED_GROUPS)
+    if "host" in snapshots:
+        values.update(FIXED_HOSTS)
+    if "command" in snapshots:
+        values.update(BASH_BUILTINS)
+    if "variable" in snapshots:
+        values.update(("HOME", "LC_ALL", "PATH"))
+    return values
+
+
+def normalized_provider_record(candidate: dict[str, object]) -> tuple[object, ...]:
+    value = str(candidate.get("value", ""))
+    return (
+        value,
+        candidate.get("display") or value,
+        candidate.get("description") or "",
+        candidate.get("kind"),
+        candidate.get("append"),
+    )
+
+
+def provider_partition(
+    detail: dict[str, Any], expected: dict[str, Any], actual: dict[str, Any]
+) -> tuple[list[list[object]], list[list[object]], bool, bool]:
+    if expected.get("provider_attribution_ambiguous"):
+        return (
+            detail["expected_candidates"],
+            detail["actual_candidates"],
+            False,
+            False,
+        )
+    mapping = expected.get("provider_candidate_records", {})
+    if not isinstance(mapping, dict):
+        mapping = {}
+
+    attributed_budget: Counter[tuple[object, ...]] = Counter()
+    attributed_records: set[tuple[object, ...]] = set()
+    occurrences = expected.get("provider_candidate_occurrences")
+    if isinstance(occurrences, list):
+        for record in occurrences:
+            if isinstance(record, dict):
+                normalized = normalized_provider_record(record)
+                attributed_budget[normalized] += 1
+                attributed_records.add(normalized)
+    else:
+        for records in mapping.values():
+            if not isinstance(records, list):
+                continue
+            provider_budget: Counter[tuple[object, ...]] = Counter()
+            for record in records:
+                if isinstance(record, dict):
+                    provider_budget[normalized_provider_record(record)] += 1
+            for record, count in provider_budget.items():
+                attributed_budget[record] = max(attributed_budget[record], count)
+                attributed_records.add(record)
+
+    expected_static: list[list[object]] = []
+    expected_active = False
+    remaining_attributed = attributed_budget.copy()
+    for item in detail["expected_candidates"]:
+        record = tuple(item)
+        if remaining_attributed[record]:
+            remaining_attributed[record] -= 1
+            expected_active = True
+        else:
+            expected_static.append(item)
+
+    static_budget: Counter[tuple[object, ...]] = Counter(map(tuple, expected_static))
+    volatile_values = snapshot_provider_values(
+        authorized_snapshot_providers(expected, actual)
+    )
+    actual_static: list[list[object]] = []
+    actual_active = False
+    for item in detail["actual_candidates"]:
+        record = tuple(item)
+        if static_budget[record]:
+            static_budget[record] -= 1
+            actual_static.append(item)
+        elif record in attributed_records or str(item[0]) in volatile_values:
+            actual_active = True
+        else:
+            actual_static.append(item)
+
+    return expected_static, actual_static, expected_active, actual_active
+
+
 def provider_explains(
     detail: dict[str, Any], expected: dict[str, Any], actual: dict[str, Any]
 ) -> bool:
-    mapping = expected.get("provider_candidates", {})
-    if not isinstance(mapping, dict):
-        return False
-    attributed = {
-        str(value)
-        for values in mapping.values()
-        if isinstance(values, list)
-        for value in values
-    }
-    snapshots = set(map(str, actual.get("snapshot_providers", [])))
-    if "process" in snapshots:
-        attributed.update(
-            str(item[0]) for item in detail["expected_candidates"] if str(item[0]).isdigit()
-        )
-    snapshot_values: set[str] = set()
-    if "process" in snapshots:
-        snapshot_values.update(FIXED_PROCESS_IDS)
-        snapshot_values.update(FIXED_PROCESS_NAMES)
-    if "network" in snapshots:
-        snapshot_values.update(FIXED_NETWORK_INTERFACES)
-    if "signal" in snapshots:
-        snapshot_values.update(FIXED_SIGNALS)
-    if "user" in snapshots:
-        snapshot_values.update(FIXED_USERS)
-    if "group" in snapshots:
-        snapshot_values.update(FIXED_GROUPS)
-    if "host" in snapshots:
-        snapshot_values.update(FIXED_HOSTS)
-    if not attributed and not snapshot_values:
-        return False
-    common_values = (
-        {item[0] for item in detail["expected_candidates"]}
-        & {item[0] for item in detail["actual_candidates"]}
-        & attributed
+    expected_static, actual_static, expected_active, actual_active = provider_partition(
+        detail, expected, actual
     )
-    for value in common_values:
-        expected_records = {tuple(item[1:]) for item in detail["expected_candidates"] if item[0] == value}
-        actual_records = {tuple(item[1:]) for item in detail["actual_candidates"] if item[0] == value}
-        if expected_records != actual_records:
-            return False
-    expected_static = [
-        item for item in detail["expected_candidates"] if item[0] not in attributed
-    ]
-    actual_static = [
-        item
-        for item in detail["actual_candidates"]
-        if item[0] not in attributed and item[0] not in snapshot_values
-    ]
-    return expected_static == actual_static
+    return (expected_active or actual_active) and expected_static == actual_static
 
 
 def provider_status_explains(
     detail: dict[str, Any], expected: dict[str, Any], actual: dict[str, Any]
 ) -> bool:
-    mapping = expected.get("provider_candidates", {})
-    if not isinstance(mapping, dict):
-        mapping = {}
-    provider_values = {
-        str(value)
-        for values in mapping.values()
-        if isinstance(values, list)
-        for value in values
-    }
-    snapshots = set(map(str, actual.get("snapshot_providers", [])))
-    snapshot_values: set[str] = set()
-    if "process" in snapshots:
-        snapshot_values.update(FIXED_PROCESS_IDS)
-        snapshot_values.update(FIXED_PROCESS_NAMES)
-    if "network" in snapshots:
-        snapshot_values.update(FIXED_NETWORK_INTERFACES)
-    if "signal" in snapshots:
-        snapshot_values.update(FIXED_SIGNALS)
-    if "user" in snapshots:
-        snapshot_values.update(FIXED_USERS)
-    if "group" in snapshots:
-        snapshot_values.update(FIXED_GROUPS)
-    if "host" in snapshots:
-        snapshot_values.update(FIXED_HOSTS)
-    expected_active = any(item[0] in provider_values for item in detail["expected_candidates"])
-    actual_active = any(
-        item[0] in provider_values or item[0] in snapshot_values
-        for item in detail["actual_candidates"]
+    expected_static, actual_static, expected_active, actual_active = provider_partition(
+        detail, expected, actual
     )
+    if expected_static or actual_static:
+        return False
     if expected_active and not actual_active:
         return detail["expected_status"] == 0 and detail["actual_status"] != 0
     if actual_active and not expected_active:
@@ -430,10 +556,87 @@ def provider_status_explains(
     return False
 
 
+def verify_provider_classifier_invariants() -> None:
+    static = ["X", "X", "static description", "value", "space"]
+    dynamic = ["X", "X", "runtime user", "value", "space"]
+    expected = {
+        "provider_categories": ["user"],
+        "provider_candidate_records": {
+            "user": [
+                {
+                    "value": "X",
+                    "display": "X",
+                    "description": "runtime user",
+                    "kind": "value",
+                    "append": "space",
+                }
+            ]
+        },
+    }
+    collision = {
+        "expected_candidates": [static, dynamic],
+        "actual_candidates": [],
+        "expected_status": 0,
+        "actual_status": 1,
+    }
+    assert not provider_explains(collision, expected, {"snapshot_providers": ["user"]})
+    assert not provider_status_explains(
+        collision, expected, {"snapshot_providers": ["user"]}
+    )
+    occurrence_expected = {
+        **expected,
+        "provider_candidate_occurrences": [
+            {
+                "value": "X",
+                "display": "X",
+                "description": "runtime user",
+                "kind": "value",
+                "append": "space",
+            }
+        ],
+    }
+    assert not provider_explains(
+        collision, occurrence_expected, {"snapshot_providers": ["user"]}
+    )
+    assert not provider_status_explains(
+        collision, occurrence_expected, {"snapshot_providers": ["user"]}
+    )
+
+    duplicate = {
+        "expected_candidates": [dynamic, dynamic],
+        "actual_candidates": [dynamic],
+        "expected_status": 0,
+        "actual_status": 0,
+    }
+    assert provider_explains(duplicate, expected, {})
+
+    unauthorized = {
+        "expected_candidates": [],
+        "actual_candidates": [["root", "root", "", "user", "space"]],
+        "expected_status": 1,
+        "actual_status": 0,
+    }
+    assert not provider_explains(
+        unauthorized, {}, {"snapshot_providers": ["user"]}
+    )
+    assert not provider_status_explains(
+        unauthorized, {}, {"snapshot_providers": ["user"]}
+    )
+
+    ambiguous = {**expected, "provider_attribution_ambiguous": True}
+    assert not provider_explains(duplicate, ambiguous, {})
+
+
 def classify_job(
     arguments: argparse.Namespace, job: tuple[str, str, str]
 ) -> dict[str, Any]:
     command, prefix, source = job
+    if job in CONTEXT_ONLY_HOST_CASES and command not in arguments.available_command_set:
+        return {
+            "job": job,
+            "category": "context_dependent",
+            "reason": "absent target command requires a global host mount snapshot",
+        }
     context: dict[str, object] = {
         "command": command,
         "current_word": prefix,
@@ -441,7 +644,7 @@ def classify_job(
         "word_index": 1,
         "command_path": [command],
         "environment": {
-            "PATH": "/usr/bin:/bin",
+            "PATH": arguments.path_value,
             "LC_ALL": "C.UTF-8",
             "HOME": str(arguments.home),
         },
@@ -460,7 +663,14 @@ def classify_job(
         "explicit_tab": True,
     }
     expected, oracle_error = run_oracle(
-        arguments, {"source": source, "path": "/usr/bin:/bin", "context": context}
+        arguments,
+        {
+            "source": source,
+            "path": arguments.path_value,
+            "sandbox_host": str(arguments.sandbox_host),
+            "oracle_store_paths": arguments.oracle_store_paths,
+            "context": context,
+        },
     )
     if oracle_error == "timeout":
         return {"job": job, "category": "resource_truncated", "side": "oracle"}
@@ -481,6 +691,23 @@ def classify_job(
             "job": job,
             "category": "vm_error",
             "error": "broad evaluation emitted a denied or unsafe probe",
+        }
+    native_provider_categories = oracle_provider_categories(expected)
+    snapshot_provider_categories = {
+        canonical_provider(str(provider))
+        for provider in actual.get("snapshot_providers", [])
+    }
+    if actual.get("filesystem_requests"):
+        snapshot_provider_categories.add("filesystem")
+    if actual.get("probes"):
+        snapshot_provider_categories.add("external-program")
+    unexpected_providers = snapshot_provider_categories - native_provider_categories
+    if unexpected_providers:
+        return {
+            "job": job,
+            "category": "semantic_diff",
+            "reason": "VM requested providers absent from the native completion",
+            "providers": sorted(unexpected_providers),
         }
     detail = dimensions(expected, actual, prefix)
     if all(detail[field] for field in ("candidates_equal", "path_equal", "status_equal")):
@@ -533,6 +760,7 @@ def main() -> int:
     parser.add_argument("--vm-timeout", type=float, default=30.0)
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("build/broad.json"))
     arguments = parser.parse_args()
+    verify_provider_classifier_invariants()
     arguments.repository = pathlib.Path.cwd()
     arguments.upstream = arguments.upstream.resolve()
     arguments.spec = arguments.spec.resolve()
@@ -541,15 +769,28 @@ def main() -> int:
     arguments.available_commands = fixed_available_commands()
     arguments.available_command_set = set(arguments.available_commands)
     arguments.users, arguments.groups, arguments.hosts = fixed_snapshots()
-    arguments.working_directory = pathlib.Path(".work/broad-empty").resolve()
-    shutil.rmtree(arguments.working_directory, ignore_errors=True)
-    arguments.working_directory.mkdir(parents=True)
-    arguments.home = pathlib.Path(".work/broad-home").resolve()
-    shutil.rmtree(arguments.home, ignore_errors=True)
-    arguments.home.mkdir(parents=True)
+    arguments.oracle_store_paths = oracle_store_closure()
     jobs = jobs_from_spec(arguments.spec)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, arguments.workers)) as executor:
-        results = list(executor.map(lambda job: classify_job(arguments, job), jobs))
+    work_root = arguments.repository / ".work"
+    work_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="broad-bash-", dir=work_root) as temporary:
+        sandbox = pathlib.Path(temporary)
+        arguments.sandbox_host = sandbox.resolve()
+        path_directory = sandbox / "path"
+        path_directory.mkdir()
+        arguments.path_value = str(path_directory)
+        arguments.working_directory = sandbox / "cwd"
+        arguments.working_directory.mkdir()
+        arguments.home = sandbox / "home"
+        arguments.home.mkdir()
+        arguments.allowed_filesystem_roots = tuple(
+            path.resolve()
+            for path in (arguments.working_directory, arguments.home, path_directory)
+        )
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, arguments.workers)
+        ) as executor:
+            results = list(executor.map(lambda job: classify_job(arguments, job), jobs))
     counts = Counter(result["category"] for result in results)
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(

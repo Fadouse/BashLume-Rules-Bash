@@ -48,6 +48,20 @@ bash_version=$("$BASH_ORACLE" --noprofile --norc -c 'printf "%s" "$BASH_VERSION"
   echo "pinned Bash oracle must be 5.3.9, got $bash_version" >&2
   exit 1
 }
+oracle_real=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$BASH_ORACLE")
+[[ $oracle_real == /nix/store/* ]] || {
+  echo "broad parity requires the pinned Nix Bash oracle, got $oracle_real" >&2
+  exit 1
+}
+command -v nix-store unshare >/dev/null || {
+  echo 'broad parity requires nix-store and unshare' >&2
+  exit 1
+}
+unshare --user --map-root-user --mount --net --uts --ipc --pid --fork \
+  --kill-child --propagation private true || {
+  echo 'rootless user/mount/network namespaces are unavailable' >&2
+  exit 1
+}
 export BASH_ORACLE
 python3 tests/differential.py \
   --upstream .work/upstream --pack build/rules.blp --pack-tool "$BASHLUME_PACK" \
