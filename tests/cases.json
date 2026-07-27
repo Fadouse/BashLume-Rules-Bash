@@ -64,6 +64,11 @@
   {
     "name": "jq options",
     "source": "completions-core/jq.bash",
+    "fixture_executables": {
+      "jq": {
+        "--help": ""
+      }
+    },
     "context": {
       "command": "jq",
       "current_word": "--",
@@ -102,6 +107,11 @@
   {
     "name": "jq short and long options",
     "source": "completions-core/jq.bash",
+    "fixture_executables": {
+      "jq": {
+        "--help": ""
+      }
+    },
     "context": {
       "command": "jq",
       "current_word": "-",
