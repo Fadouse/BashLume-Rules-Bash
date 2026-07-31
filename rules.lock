@@ -7,7 +7,7 @@
     "version": "0.2.0"
   },
   "edge": {
-    "commit": "c688151922743db645a209fdf862d6abab72a986",
+    "commit": "23361e37619ad7ccc8775406ce39ebe8288a4f46",
     "ref": "main"
   },
   "minimum_engine": "0.2.0",
